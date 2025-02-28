@@ -53,3 +53,25 @@ type GetUserProfileEvent struct {
 	Phone   string `json:"phone"`
 	Age     int    `json:"age" `
 }
+
+// AdminCreateEvent struct is used for admin creation event
+type AdminCreateEvent struct {
+	SuperAdminID string `json:"super_admin_id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	Password     string `json:"password"`
+	AvatarData   []byte `json:"avatar_data"`
+	AvatarName   string `json:"avatar_name"`
+	AvatarType   string `json:"avatar_type"`
+}
+
+// AdminUpdateEvent struct is used for admin update event
+type AdminUpdateEvent struct {
+	ID         string `json:"id"`
+	Username   string `json:"username,omitempty"`
+	Email      string `json:"email,omitempty"`
+	Password   string `json:"password,omitempty"`
+	AvatarData []byte `json:"avatar_data,omitempty"`
+	AvatarName string `json:"avatar_name,omitempty"`
+	AvatarType string `json:"avatar_type,omitempty"`
+}

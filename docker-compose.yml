@@ -1,85 +1,101 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15
-    container_name: postgres_container
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB:  ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - app_network
   redis:
-    image: redis:6
+    image: redis:7.4.2
     container_name: redis_container
     restart: always
+    env_file:
+      - .env
     ports:
       - "6379:6379"
-    environment:
-      REDIS_URI:  ${REDIS_URI}
-    command: [ "redis-server", "--requirepass", "${REDIS_URI}" ]
     volumes:
-      - redis_data:/data
+      - redis_data:/data/redis
     networks:
       - app_network
 
+
+
   mongo:
-    image: mongo:6
+    image: mongo:latest
     container_name: mongo_container
     restart: always
     environment:
-      MONGO_URI: ${MONGO_URI}
+      - MONGO_URI=${MONGO_URI}
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
     networks:
       - app_network
+    env_file:
+      - .env
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:management
     container_name: rabbitmq_container
-    restart: always
-    environment:
-      RABBITMQ_URI : ${RABBITMQ_URI}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "15672:15672"  # Web UI
+      - "5672:5672"    # AMQP protocol
+    environment:
+      - RABBITMQ_DEFAULT_USER=oksa
+      - RABBITMQ_DEFAULT_PASS=password
+      - RABBITMQ_DEFAULT_VHOST=/
     networks:
-      - app_network
+        - app_network
+
+
 
   user-service:
-    build: ./user-service
+    build:
+      context: ./
+      dockerfile: user-service/user-service.Dockerfile
     container_name: user_service_container
-    restart: always
     depends_on:
-      - postgres
-      - mongo
       - rabbitmq
+      - redis
+    ports:
+      - "8081:8081"
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - RUNNING_IN_DOCKER=true
+    volumes:
+      - ./.env:/app/.env
+    networks:
+    - app_network
+
+
+  api-gateway:
+    build:
+      context: ./  # Make sure this is the correct path to your project
+      dockerfile: api-gateway/api-gateway.Dockerfile
+    container_name: api_gateway_container
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      user-service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - RUNNING_IN_DOCKER=true
+    volumes:
+      - ./.env:/app/.env
     networks:
       - app_network
 
-  api-gateway:
-    build: ./api-gateway
-    container_name: api_gateway_container
-    restart: always
-    depends_on:
-      - user-service
-    ports:
-      - "8080:8080"
-    networks:
-      - app_network
 
 networks:
   app_network:
+    driver: bridge
 
 volumes:
-  postgres_data:
   mongo_data:
   redis_data:

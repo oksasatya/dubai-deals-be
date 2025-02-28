@@ -13,10 +13,12 @@ import (
 
 type UserRepo interface {
 	SaveUser(ctx context.Context, user *models.User) (*mongo.InsertOneResult, error)
+	UpdateUser(ctx context.Context, user *models.User) (*mongo.UpdateResult, error)
 	SaveToActivityLog(ctx context.Context, activity *models.UserActivityLog) (*mongo.InsertOneResult, error)
 	FindUserByEmail(ctx context.Context, email string) (*models.User, error)
 	FindUserByID(ctx context.Context, id string) (*models.User, error)
 	FindByGoogleID(ctx context.Context, googleID string) (*models.User, error)
+	FindUserByRole(ctx context.Context, role string) ([]models.User, error)
 }
 
 type userRepo struct {
@@ -40,6 +42,23 @@ func (r *userRepo) SaveUser(ctx context.Context, user *models.User) (*mongo.Inse
 	defer cancel()
 
 	result, err := r.db.Collection("users").InsertOne(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (r *userRepo) UpdateUser(ctx context.Context, user *models.User) (*mongo.UpdateResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	objectID, err := primitive.ObjectIDFromHex(user.ID.Hex())
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID format: %v", err)
+	}
+
+	result, err := r.db.Collection("users").UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": user})
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +111,23 @@ func (r *userRepo) SaveToActivityLog(ctx context.Context, activity *models.UserA
 	}
 
 	return result, nil
+}
+
+func (r *userRepo) FindUserByRole(ctx context.Context, role string) ([]models.User, error) {
+	var users []models.User
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cursor, err := r.db.Collection("users").Find(ctx, bson.M{"role": role})
+	if err != nil {
+		return nil, err
+	}
+
+	if err = cursor.All(ctx, &users); err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
 
 func NewUserRepo(db *mongo.Database) UserRepo {

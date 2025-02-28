@@ -1,0 +1,11 @@
+root_dir = "."
+tmp_dir = "tmp"
+[build]
+cmd = "go build -o ./tmp/main.exe ./cmd/app"
+bin = "./tmp/main.exe"
+full_bin = "./tmp/main.exe"
+
+[log]
+level = "debug"
+
+env_file = ".env.development"

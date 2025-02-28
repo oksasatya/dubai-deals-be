@@ -15,6 +15,7 @@ import (
 	"messaging"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -29,7 +30,11 @@ type App struct {
 
 // Handler Struct for saving instance of handler
 type Handler struct {
-	UserHandler *handler.UserHandler
+	UserHandler  *handler.UserHandler
+	AdminHandler *handler.AdminHandler
+}
+
+type RegisterRoutes struct {
 }
 
 // Initialize sets up environment and app
@@ -94,32 +99,46 @@ func (app *App) Initialize() {
 		logrus.Fatal("Failed to initialize handler")
 	}
 
-	routes.UserRoutes(app.Server, cfg, app.RMQ, app.ResponseHandler)
+	// Initialize routes
+	registerRoutes := routes.RegisterRoutes{
+		Echo: app.Server,
+		Cfg:  cfg,
+		RMQ:  app.RMQ,
+		Res:  app.ResponseHandler,
+	}
+	registerRoutes.RegisterAllRoutes()
 }
 
 // LoadEnv function to load environment variables
 func (app *App) LoadEnv() {
-	if err := godotenv.Load(); err != nil {
-		logrus.Fatal("Error loading .env file ", err)
+	cwd, err := os.Getwd()
+	if err != nil {
+		logrus.Fatal("Error getting current working directory:", err)
 	}
 
-	envFile := ".env"
-
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "development" {
-		envFile = ".env.development"
+	envPath := filepath.Join(cwd, "..", ".env")
+	if err := godotenv.Load(envPath); err != nil {
+		logrus.Println("Warning: No .env file found, continuing...")
 	}
 
-	if err := godotenv.Load(envFile); err != nil {
-		logrus.Fatal("Error loading .env file ", err)
+	var devEnvPath string
+	if os.Getenv("RUNNING_IN_DOCKER") == "true" {
+		devEnvPath = "/app/.env"
+	} else if os.Getenv("APP_ENV") == "development" {
+		devEnvPath = filepath.Join(cwd, "..", ".env.development")
+	} else {
+		devEnvPath = filepath.Join(cwd, "..", ".env")
 	}
 
-	logrus.Printf("Environment running on: %s , .env : %s", appEnv, envFile)
+	if err := godotenv.Load(devEnvPath); err != nil {
+		logrus.Fatal("Error loading .env file:", err)
+	}
+	logrus.Println("Successfully loaded .env from:", devEnvPath)
 }
 
 // Run starts the server
 func (app *App) Run() {
-	port := os.Getenv("PORT")
+	port := os.Getenv("API_GATEWAY_PORT")
 	if port == "" {
 		port = "8080"
 	}

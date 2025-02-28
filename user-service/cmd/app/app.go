@@ -11,6 +11,7 @@ import (
 	"messaging"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"user-service/api"
@@ -64,7 +65,6 @@ func (app *App) Initialize() {
 // RunConsumer function to run consumer
 func (app *App) RunConsumer(wg *sync.WaitGroup) {
 	defer wg.Done()
-
 	eventHandlers := map[string]func(models.Event){
 		"UserRegistered": func(event models.Event) {
 			ctx := context.Background()
@@ -133,7 +133,7 @@ func (app *App) RunConsumer(wg *sync.WaitGroup) {
 
 // Run function to run the app
 func (app *App) Run() {
-	port := os.Getenv("PORT")
+	port := os.Getenv("USER_SERVICE_PORT")
 	if port == "" {
 		port = "8080"
 	}
@@ -159,20 +159,27 @@ func (app *App) Run() {
 
 // LoadEnv function to load environment variables
 func (app *App) LoadEnv() {
-	if err := godotenv.Load(); err != nil {
-		logrus.Fatal("Error loading .env file ", err)
+	cwd, err := os.Getwd()
+	if err != nil {
+		logrus.Fatal("Error getting current working directory:", err)
 	}
 
-	envFile := ".env"
-
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "development" {
-		envFile = ".env.development"
+	envPath := filepath.Join(cwd, "..", ".env")
+	if err := godotenv.Load(envPath); err != nil {
+		logrus.Println("Warning: No .env file found, continuing...")
 	}
 
-	if err := godotenv.Load(envFile); err != nil {
-		logrus.Fatal("Error loading .env file ", err)
+	var devEnvPath string
+	if os.Getenv("RUNNING_IN_DOCKER") == "true" {
+		devEnvPath = "/app/.env"
+	} else if os.Getenv("APP_ENV") == "development" {
+		devEnvPath = filepath.Join(cwd, "..", ".env.development")
+	} else {
+		devEnvPath = filepath.Join(cwd, "..", ".env")
 	}
 
-	logrus.Printf("Environment running on: %s , .env : %s", appEnv, envFile)
+	if err := godotenv.Load(devEnvPath); err != nil {
+		logrus.Fatal("Error loading .env.development file:", err)
+	}
+	logrus.Println("Successfully loaded .env.development from:", devEnvPath)
 }

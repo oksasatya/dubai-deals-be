@@ -1,41 +1,32 @@
 package middleware
 
 import (
-	"github.com/golang-jwt/jwt/v5"
+	"api-gateway/utils"
+	"api-gateway/webResponse"
 	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
 	"net/http"
-	"strings"
 )
 
 // RoleMiddleware function to check user role
-func RoleMiddleware(requiredRole string, jwtKey []byte) echo.MiddlewareFunc {
+func RoleMiddleware[T comparable](allowedRole ...T) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Token not found"})
+			claims, ok := c.Get("user").(*utils.JWTCustomClaims)
+			if !ok || claims == nil {
+				logrus.Warn("Invalid claims type or missing token claims")
+				return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "Unauthorized")
 			}
 
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-				return jwtKey, nil
-			})
-			if err != nil || !token.Valid {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid token"})
+			// Check if user role is allowed
+			for _, role := range allowedRole {
+				if role == role {
+					return next(c)
+				}
 			}
 
-			claims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid token"})
-			}
-
-			role, ok := claims["role"].(string)
-			if !ok || role != requiredRole {
-				return c.JSON(http.StatusForbidden, map[string]string{"error": "You don't have permission to access this route"})
-			}
-
-			return next(c)
+			logrus.Warn("User role is not allowed")
+			return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "You don't have permission to access this route")
 		}
 	}
 }

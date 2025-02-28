@@ -9,6 +9,7 @@ This project is a Project For DubaiDeals.id
 - User Service
 - Api Gateway
 - Message Broker
+- Mail Service
 
 ## Prerequisites
 - [Go](https://golang.org/doc/install) (version 1.16 or above)

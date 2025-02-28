@@ -2,12 +2,11 @@ package messaging
 
 import (
 	"fmt"
+	"github.com/rabbitmq/amqp091-go"
+	"github.com/sirupsen/logrus"
 	"os"
 	"sync"
 	"time"
-
-	"github.com/rabbitmq/amqp091-go"
-	"github.com/sirupsen/logrus"
 )
 
 // RabbitMQConnection struct to hold RabbitMQ connection
@@ -24,6 +23,22 @@ func NewRabbitMQConnection() (*RabbitMQConnection, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Declare exchange here
+	err = rmq.channel.ExchangeDeclare(
+		"events_exchange", // Exchange name
+		"topic",           // Exchange type
+		true,              // Durable
+		false,             // Auto-deleted
+		false,             // Internal
+		false,             // No wait
+		nil,               // Arguments
+	)
+	if err != nil {
+		logrus.Errorf("Failed to declare exchange during initialization: %v", err)
+		return nil, err
+	}
+
 	return rmq, nil
 }
 

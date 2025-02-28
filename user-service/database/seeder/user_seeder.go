@@ -15,12 +15,11 @@ func SeedUsers(db *mongo.Database) {
 	userCollection := db.Collection("users")
 
 	var users []interface{}
-
+	password, _ := utils.HashPassword("test12345")
+	imageUrl := "https://picsum.photos/200/300"
 	for i := 1; i <= 15; i++ {
 		gofakeit.Seed(0)
-		password, _ := utils.HashPassword("test12345")
 		role := gofakeit.RandomString([]string{models.RoleAdmin, models.RoleUser})
-		imageUrl := "https://picsum.photos/200/300"
 		user := models.User{
 			Username: gofakeit.Name(),
 			Email:    gofakeit.Email(),
@@ -34,6 +33,19 @@ func SeedUsers(db *mongo.Database) {
 		}
 		users = append(users, user)
 	}
+
+	superAdmin := models.User{
+		Username: "superadmin",
+		Email:    "superAdmin@example.net",
+		Address:  gofakeit.Address().Address,
+		Age:      gofakeit.Number(18, 60),
+		Phone:    gofakeit.Phone(),
+		Password: password,
+		GoogleID: gofakeit.UUID(),
+		Avatar:   imageUrl,
+		Role:     models.RoleSuperAdmin,
+	}
+	users = append(users, superAdmin)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

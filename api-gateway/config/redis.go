@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/go-redis/redis/v8"
 	"github.com/sirupsen/logrus"
 	"os"
@@ -13,8 +14,12 @@ var Ctx = context.Background()
 
 // NewRedisClient function to initialize Redis client
 func NewRedisClient() *redis.Client {
+	redisAddr := os.Getenv("REDIS_URL")
+	fmt.Println("Connecting to Redis at:", redisAddr)
 	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_URI"),
+		Addr:     redisAddr,
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       0,
 	})
 
 	// Cek koneksi
