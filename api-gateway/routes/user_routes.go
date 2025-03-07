@@ -24,6 +24,8 @@ func UserRoutes(e *echo.Echo, cfg *config.RateLimitConfig, rmq *messaging.Rabbit
 
 	// protected routes
 	r.Use(middleware.JWTMiddleware())
+	//logout
+	r.POST("/logout", userHandler.Logout)
 	// profile routes
 	r.GET("/profile", userHandler.GetProfile)
 }

@@ -5,13 +5,6 @@ import (
 	"time"
 )
 
-// Enum Role USER
-const (
-	RoleSuperAdmin = "SUPER_ADMIN"
-	RoleAdmin      = "ADMIN"
-	RoleUser       = "USER"
-)
-
 // User Model struct
 type User struct {
 	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
@@ -23,7 +16,7 @@ type User struct {
 	Age       int                `json:"age,omitempty" bson:"age,omitempty"`
 	GoogleID  string             `json:"google_id,omitempty" bson:"google_id,omitempty"`
 	Avatar    string             `json:"avatar,omitempty" bson:"avatar,omitempty"`
-	Role      string             `json:"role" bson:"role"`
+	RoleID    primitive.ObjectID `json:"role_id" bson:"role_id"`
 	CreatedAt time.Time          `json:"created_at,omitempty" bson:"created_at,omitempty"`
 	UpdatedAt time.Time          `json:"updated_at,omitempty" bson:"updated_at,omitempty"`
 }

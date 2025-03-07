@@ -21,6 +21,7 @@ type UserService interface {
 	HandleUserLogin(ctx context.Context, eventData []byte, correlationID string)
 	HandleUserOauth(ctx context.Context, eventData []byte, correlationID string)
 	HandleGetProfile(ctx context.Context, eventData []byte, correlationID string)
+	HandleUserLogout(ctx context.Context, eventData []byte, correlationID string)
 }
 
 type userService struct {
@@ -52,6 +53,16 @@ func (c *userService) HandleUserRegistered(ctx context.Context, eventData []byte
 		return
 	}
 
+	userRole, err := c.userRepo.GetRoleIDByName(ctx, models.RoleUser)
+	if err != nil {
+		roleID := primitive.NewObjectID()
+		role := models.Role{
+			ID:   roleID,
+			Name: models.RoleUser,
+		}
+		_, err = c.userRepo.SaveRole(ctx, &role)
+	}
+
 	// Hash password
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
@@ -70,7 +81,7 @@ func (c *userService) HandleUserRegistered(ctx context.Context, eventData []byte
 		Age:       req.Age,
 		Phone:     req.Phone,
 		Password:  hashedPassword,
-		Role:      models.RoleUser,
+		RoleID:    userRole,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -88,7 +99,7 @@ func (c *userService) HandleUserRegistered(ctx context.Context, eventData []byte
 	SaveActivityLog := &models.UserActivityLog{
 		UserID:            newUser.ID,
 		ActivityType:      "Register",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
 	}
 	_, err = c.userRepo.SaveToActivityLog(ctx, SaveActivityLog)
 	if err != nil {
@@ -101,7 +112,7 @@ func (c *userService) HandleUserRegistered(ctx context.Context, eventData []byte
 		Address:  newUser.Address,
 		Age:      newUser.Age,
 		Phone:    newUser.Phone,
-		Role:     newUser.Role,
+		Role:     models.RoleUser,
 	})
 	if successResponse != nil {
 		logrus.Errorf("[RabbitMQ] Failed to publish UserRegisteredSuccess: %v", successResponse)
@@ -120,48 +131,62 @@ func (c *userService) HandleUserLogin(ctx context.Context, eventData []byte, cor
 	var req models.UserLoginEvent
 	if err := json.Unmarshal(eventData, &req); err != nil {
 		logrus.Errorf("Invalid event data: %v", err)
+		c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, "Invalid request data")
 		return
 	}
 
-	// find user by email
+	// Cari user berdasarkan email
 	user, err := c.userRepo.FindUserByEmail(ctx, req.Email)
-	if err != nil {
-		errorResponse := c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, "User Already Registered")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish UserLoginFailed: %v", errorResponse)
+	if err != nil || user == nil {
+		logrus.Warnf("Login failed for email: %s | Reason: User not found", req.Email)
+
+		errMsg := "Invalid Email or Password"
+		sendErr := c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, errMsg)
+		if sendErr != nil {
+			logrus.Errorf("Failed to publish UserLoginFailed: %v", sendErr)
 		}
 		return
 	}
 
-	// Cek if password is correct
 	if !utils.CheckPasswordHash(req.Password, user.Password) {
-		errorResponse := c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, "Invalid Email or Password")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish UserLoginFailed: %v", errorResponse)
+		logrus.Warnf("Login failed for email: %s | Reason: Invalid password", req.Email)
+
+		errMsg := "Invalid Email or Password"
+		sendErr := c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, errMsg)
+		if sendErr != nil {
+			logrus.Errorf("Failed to publish UserLoginFailed: %v", sendErr)
 		}
 		return
 	}
 
-	// save to userActivityLog
+	roleName, err := c.userRepo.GetRoleNameByID(ctx, user.RoleID)
+	if err != nil {
+		logrus.Errorf("Failed to fetch role name: %v", err)
+		c.sendMessage.SendingToMessage("UserLoginFailed", correlationID, "Failed to get user role")
+		return
+	}
+
+	// Simpan ke userActivityLog
 	SaveActivityLog := models.UserActivityLog{
 		ID:                primitive.NewObjectID(),
 		UserID:            user.ID,
 		ActivityType:      "Login",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
 	}
 
 	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
 	if err != nil {
 		logrus.Errorf("Failed to save user activity log: %v", err)
 	}
+
 	successResponse := c.sendMessage.SendingToMessage("UserLoginSuccess", correlationID, models.UserLoginEvent{
 		ID:    user.ID.Hex(),
 		Email: user.Email,
-		Role:  user.Role,
+		Role:  roleName,
 	})
 
 	if successResponse != nil {
-		logrus.Errorf("failed to publish User Login Success %v", successResponse)
+		logrus.Errorf("Failed to publish UserLoginSuccess: %v", successResponse)
 	}
 }
 
@@ -188,12 +213,21 @@ func (c *userService) HandleUserOauth(ctx context.Context, eventData []byte, cor
 	if err != nil {
 		// if not found
 		if errors.Is(mongo.ErrNoDocuments, err) {
+			roleID, err := c.userRepo.GetRoleIDByName(ctx, models.RoleUser)
+			if err != nil {
+				role := models.Role{
+					ID:   primitive.NewObjectID(),
+					Name: models.RoleUser,
+				}
+				_, err = c.userRepo.SaveRole(ctx, &role)
+			}
+
 			newUser := models.User{
 				GoogleID:  req.GoogleID,
 				Email:     req.Email,
 				Username:  req.Username,
 				Avatar:    req.Avatar,
-				Role:      models.RoleUser,
+				RoleID:    roleID,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}
@@ -219,12 +253,13 @@ func (c *userService) HandleUserOauth(ctx context.Context, eventData []byte, cor
 			Email:    user.Email,
 			Username: user.Username,
 			Avatar:   user.Avatar,
-			Role:     user.Role,
+			Role:     models.RoleUser,
 		})
 
 		if successResponse != nil {
 			logrus.Errorf("failed to publish User Oauth Success %v", successResponse)
 		}
+		return
 	}
 }
 
@@ -264,7 +299,7 @@ func (c *userService) HandleGetProfile(ctx context.Context, payloadBytes []byte,
 		ID:                primitive.NewObjectID(),
 		UserID:            user.ID,
 		ActivityType:      "User Profile",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
 	}
 
 	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
@@ -281,6 +316,64 @@ func (c *userService) HandleGetProfile(ctx context.Context, payloadBytes []byte,
 		Phone:   user.Phone,
 	}); err != nil {
 		logrus.Errorf("Failed to publish GetProfileSuccess: %v", err)
+	}
+}
+
+// HandleUserLogout is a function to handle user logout
+func (c *userService) HandleUserLogout(ctx context.Context, eventData []byte, correlationID string) {
+	var req models.UserLogoutEvent
+	if err := json.Unmarshal(eventData, &req); err != nil {
+		logrus.Errorf("Invalid event data: %v", err)
+		_ = c.sendMessage.SendingToMessage("UserLogoutFailed", correlationID, "Invalid request format")
+		return
+	}
+
+	if req.Token == "" {
+		logrus.Error("[UserLogout] Missing token in logout event")
+		_ = c.sendMessage.SendingToMessage("UserLogoutFailed", correlationID, "Missing token")
+		return
+	}
+
+	if req.UserID == "" {
+		logrus.Error("[UserLogout] Missing UserID in logout event")
+		_ = c.sendMessage.SendingToMessage("UserLogoutFailed", correlationID, "Missing UserID")
+		return
+	}
+
+	user, err := c.userRepo.FindUserByID(ctx, req.UserID)
+	if err != nil {
+		logrus.Errorf("[UserLogout] Failed to find user by ID: %s, error: %v", req.UserID, err)
+		_ = c.sendMessage.SendingToMessage("UserLogoutFailed", correlationID, "Failed to find user")
+		return
+	}
+
+	// save to userActivityLog
+	SaveActivityLog := models.UserActivityLog{
+		ID:                primitive.NewObjectID(),
+		UserID:            user.ID,
+		ActivityType:      "User Logout",
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
+	}
+
+	if _, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog); err != nil {
+		logrus.Errorf("Failed to save user activity log: %v", err)
+		_ = c.sendMessage.SendingToMessage("UserLogoutFailed", correlationID, "Failed to save user activity log")
+		return
+	}
+
+	logoutResponse := map[string]string{
+		"message": "Logout successful",
+	}
+
+	payload, err := json.Marshal(logoutResponse)
+	if err != nil {
+		logrus.Errorf("[UserLogout] Failed to marshal response: %v", err)
+		return
+	}
+
+	// send success message
+	if err := c.sendMessage.SendingToMessage("UserLogoutSuccess", correlationID, string(payload)); err != nil {
+		logrus.Errorf("Failed to publish UserLogoutSuccess: %v", err)
 	}
 }
 

@@ -36,3 +36,14 @@ func (a *AdminUpdateRequest) Validate() error {
 	validate := validator.New()
 	return validate.Struct(a)
 }
+
+type GetAllAdminRequest struct {
+	AdminID   string `json:"admin_id" validate:"required"`
+	Role      string `json:"role"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	Phone     string `json:"phone"`
+	Address   string `json:"address"`
+	Age       int    `json:"age"`
+	AvatarUrl string `json:"avatar_url"`
+}

@@ -54,6 +54,12 @@ type GetUserProfileEvent struct {
 	Age     int    `json:"age" `
 }
 
+// UserLogoutEvent struct is used for user logout event
+type UserLogoutEvent struct {
+	UserID string `json:"user_id"`
+	Token  string `json:"token"`
+}
+
 // AdminCreateEvent struct is used for admin creation event
 type AdminCreateEvent struct {
 	SuperAdminID string `json:"super_admin_id"`
@@ -63,6 +69,7 @@ type AdminCreateEvent struct {
 	AvatarData   []byte `json:"avatar_data"`
 	AvatarName   string `json:"avatar_name"`
 	AvatarType   string `json:"avatar_type"`
+	Role         string `json:"role"`
 }
 
 // AdminUpdateEvent struct is used for admin update event
@@ -74,4 +81,13 @@ type AdminUpdateEvent struct {
 	AvatarData []byte `json:"avatar_data,omitempty"`
 	AvatarName string `json:"avatar_name,omitempty"`
 	AvatarType string `json:"avatar_type,omitempty"`
+}
+
+// GetAllAdminsEvent struct is used for get all admins event
+type GetAllAdminsEvent struct {
+	AdminId   string `json:"admin_id"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatar_url"`
+	Role      string `json:"role"`
 }

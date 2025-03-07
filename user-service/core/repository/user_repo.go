@@ -18,11 +18,45 @@ type UserRepo interface {
 	FindUserByEmail(ctx context.Context, email string) (*models.User, error)
 	FindUserByID(ctx context.Context, id string) (*models.User, error)
 	FindByGoogleID(ctx context.Context, googleID string) (*models.User, error)
-	FindUserByRole(ctx context.Context, role string) ([]models.User, error)
+	GetUserByRole(userID primitive.ObjectID, db *mongo.Database) (models.User, models.Role, error)
+	GetRoleNameByID(ctx context.Context, roleID primitive.ObjectID) (string, error)
+	GetRoleIDByName(ctx context.Context, roleName string) (primitive.ObjectID, error)
+	SaveRole(ctx context.Context, role *models.Role) (*mongo.InsertOneResult, error)
+	FindUsersByRole(ctx context.Context, roleID primitive.ObjectID) ([]models.User, error)
 }
 
 type userRepo struct {
 	db *mongo.Database
+}
+
+func (r *userRepo) FindUsersByRole(ctx context.Context, roleID primitive.ObjectID) ([]models.User, error) {
+	var users []models.User
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cursor, err := r.db.Collection("users").Find(ctx, bson.M{"role_id": roleID})
+	if err != nil {
+		return nil, err
+	}
+
+	defer cursor.Close(ctx)
+	if err = cursor.All(ctx, &users); err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func (r *userRepo) SaveRole(ctx context.Context, role *models.Role) (*mongo.InsertOneResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := r.db.Collection("roles").InsertOne(ctx, role)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (r *userRepo) FindByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
@@ -113,21 +147,44 @@ func (r *userRepo) SaveToActivityLog(ctx context.Context, activity *models.UserA
 	return result, nil
 }
 
-func (r *userRepo) FindUserByRole(ctx context.Context, role string) ([]models.User, error) {
-	var users []models.User
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+func (r *userRepo) GetUserByRole(userID primitive.ObjectID, db *mongo.Database) (models.User, models.Role, error) {
+	userCollection := db.Collection("users")
+	roleCollection := db.Collection("roles")
 
-	cursor, err := r.db.Collection("users").Find(ctx, bson.M{"role": role})
+	var user models.User
+	err := userCollection.FindOne(context.TODO(), bson.M{"_id": userID}).Decode(&user)
 	if err != nil {
-		return nil, err
+		return models.User{}, models.Role{}, err
 	}
 
-	if err = cursor.All(ctx, &users); err != nil {
-		return nil, err
+	var role models.Role
+	err = roleCollection.FindOne(context.TODO(), bson.M{"_id": user.RoleID}).Decode(&role)
+	if err != nil {
+		return user, models.Role{}, err
 	}
 
-	return users, nil
+	return user, role, nil
+}
+
+func (r *userRepo) GetRoleNameByID(ctx context.Context, roleID primitive.ObjectID) (string, error) {
+	roleCollection := r.db.Collection("roles")
+
+	var role models.Role
+	err := roleCollection.FindOne(ctx, bson.M{"_id": roleID}).Decode(&role)
+	if err != nil {
+		return "", err
+	}
+	return role.Name, nil
+}
+
+func (r *userRepo) GetRoleIDByName(ctx context.Context, roleName string) (primitive.ObjectID, error) {
+	roleCollection := r.db.Collection("roles")
+	var role models.Role
+	err := roleCollection.FindOne(ctx, bson.M{"name": roleName}).Decode(&role)
+	if err != nil {
+		return primitive.NilObjectID, err
+	}
+	return role.ID, nil
 }
 
 func NewUserRepo(db *mongo.Database) UserRepo {

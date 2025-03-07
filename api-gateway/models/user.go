@@ -11,6 +11,7 @@ type RegisterRequest struct {
 	Address  string `json:"address" validate:"required"`
 	Phone    string `json:"phone" validate:"required"`
 	Age      int    `json:"age" validate:"required,gt=0"`
+	Role     string `json:"role" `
 }
 
 func (r *RegisterRequest) Validate() error {
@@ -49,4 +50,10 @@ type UserProfileRequest struct {
 func (u *UserProfileRequest) Validate() error {
 	validate := validator.New()
 	return validate.Struct(u)
+}
+
+// LogoutRequest Request for Logout
+type LogoutRequest struct {
+	UserID string `json:"user_id" validate:"required"`
+	Token  string `json:"token" validate:"required"`
 }

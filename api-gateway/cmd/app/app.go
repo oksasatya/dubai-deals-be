@@ -60,10 +60,7 @@ func (app *App) Initialize() {
 	)))
 
 	// Redis
-	redisClient := config.NewRedisClient()
-	if redisClient == nil {
-		logrus.Fatal("Failed to initialize Redis")
-	}
+	config.InitRedis()
 
 	// Logger
 	config.SetupLogger()
@@ -88,7 +85,8 @@ func (app *App) Initialize() {
 		logrus.Fatal("Failed to initialize RabbitMQ")
 	}
 	app.Handler = &Handler{
-		UserHandler: handler.NewUserHandler(cfg, app.RMQ, app.ResponseHandler),
+		UserHandler:  handler.NewUserHandler(cfg, app.RMQ, app.ResponseHandler),
+		AdminHandler: handler.NewAdminHandler(cfg, app.RMQ, app.ResponseHandler),
 	}
 	app.ResponseHandler = webResponse.NewResponseHandler(app.RMQ)
 	if app.ResponseHandler == nil {

@@ -15,9 +15,9 @@ func AdminRoutes(e *echo.Echo, cfg *config.RateLimitConfig, rmq *messaging.Rabbi
 	adminHandler := handler.NewAdminHandler(cfg, rmq, res)
 	e.Static("/uploads", "uploads")
 	r := e.Group("/api/admins")
-	//r.POST("/login", adminHandler.Login)
 	// protected routes
 	r.Use(middleware.JWTMiddleware())
+	r.GET("/get-admin", adminHandler.GetAllAdmin, middleware.RoleMiddleware(modelsUser.RoleSuperAdmin, modelsUser.RoleAdmin))
 	r.POST("/create-admin", adminHandler.CreateAdmin, middleware.RoleMiddleware(modelsUser.RoleSuperAdmin))
-	r.PUT("/update-admin/:id", adminHandler.UpdateAdmin, middleware.RoleMiddleware(modelsUser.RoleSuperAdmin, modelsUser.RoleAdmin))
+	r.PUT("/update-admin/:id", adminHandler.UpdateAdmin, middleware.RoleMiddleware(modelsUser.RoleSuperAdmin))
 }

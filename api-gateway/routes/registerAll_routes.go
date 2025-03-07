@@ -7,15 +7,15 @@ import (
 	"messaging"
 )
 
+type NewRegisterRoutes interface {
+	RegisterAllRoutes()
+}
+
 type RegisterRoutes struct {
 	Echo *echo.Echo
 	Cfg  *config.RateLimitConfig
 	RMQ  *messaging.RabbitMQConnection
 	Res  *webResponse.ResponseHandler
-}
-
-type NewRegisterRoutes interface {
-	RegisterAllRoutes()
 }
 
 func (r *RegisterRoutes) RegisterAllRoutes() {

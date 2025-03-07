@@ -18,6 +18,7 @@ type Migration struct {
 // Migrate is a function to migrate all tables
 func Migrate(db *mongo.Database) error {
 	migrations := []*Migration{
+		createRoleCollectionMigration(db, "name"),
 		createUsersCollectionMigration(db, "email"),
 		createUseractivitylogCollectionMigration(db, "userID"),
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 // RoleMiddleware function to check user role
-func RoleMiddleware[T comparable](allowedRole ...T) echo.MiddlewareFunc {
+func RoleMiddleware(allowedRoles ...string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			claims, ok := c.Get("user").(*utils.JWTCustomClaims)
@@ -18,15 +18,16 @@ func RoleMiddleware[T comparable](allowedRole ...T) echo.MiddlewareFunc {
 				return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "Unauthorized")
 			}
 
-			// Check if user role is allowed
-			for _, role := range allowedRole {
-				if role == role {
+			logrus.Infof("User Role: %s, Allowed Roles: %v", claims.Role, allowedRoles)
+
+			for _, role := range allowedRoles {
+				if role == claims.Role {
 					return next(c)
 				}
 			}
 
-			logrus.Warn("User role is not allowed")
-			return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "You don't have permission to access this route")
+			logrus.Warn("User role is not allowed: " + claims.Role)
+			return webResponse.ResponseJson(c, http.StatusForbidden, nil, "You don't have permission to access this route")
 		}
 	}
 }

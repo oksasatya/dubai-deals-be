@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"messaging"
 	"net/http"
+	"strings"
 	"user-service/api"
 )
 
@@ -158,5 +159,56 @@ func (h *UserHandler) GetProfile(c echo.Context) error {
 		"Get Profile successfully",
 		"GetProfileSuccess",
 		"GetProfileFailed",
+	)
+}
+
+// Logout handles user logout event-driven
+func (h *UserHandler) Logout(c echo.Context) error {
+	// rate limit
+	if err := config.CheckRateLimit(c); err != nil {
+		return err
+	}
+
+	userClaims := c.Get("user").(*utils.JWTCustomClaims)
+	if userClaims == nil {
+		logrus.Error("[Logout] Invalid token claims")
+		return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "Unauthorized! : No user Id found")
+	}
+
+	authHeader := c.Request().Header.Get("Authorization")
+	if authHeader == "" {
+		logrus.Error("[Logout] No Authorization header found")
+		return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "Missing Authorization header")
+	}
+
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		logrus.Error("[Logout] No token found")
+		return webResponse.ResponseJson(c, http.StatusUnauthorized, nil, "Invalid Token")
+	}
+
+	// Generate Correlation ID
+	correlationID := utils.GenerateCorrelationID()
+
+	// send event logout to user-service
+	logoutRequest := models.LogoutRequest{
+		UserID: userClaims.UserID,
+		Token:  token,
+	}
+	err := h.SendMessage.SendingToMessage("UserLogout", correlationID, logoutRequest)
+	if err != nil {
+		logrus.Errorf("[Logout] Failed to send message: %v", err)
+		return webResponse.ResponseJson(c, http.StatusInternalServerError, nil, "Failed to process logout")
+	}
+
+	// wait for response from user-service
+	return h.ResponseHandler.HandleEventResponse(
+		c,
+		false,
+		http.StatusOK,
+		h.Config.RequestTimeout,
+		"User logged out successfully",
+		"UserLogoutSuccess",
+		"UserLogoutFailed",
 	)
 }

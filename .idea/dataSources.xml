@@ -25,7 +25,7 @@
       </jdbc-additional-properties>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
-    <data-source source="LOCAL" name="dubaiDealsRedis@localhost" uuid="6a0abd76-2bdc-46c7-8cdb-6f8f712928f4">
+    <data-source source="LOCAL" name="dubaiDealsStagingRedis@localhost" uuid="24c314fb-92a1-4385-903a-3a73588bee0b">
       <driver-ref>redis</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>jdbc.RedisDriver</jdbc-driver>

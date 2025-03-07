@@ -14,75 +14,18 @@ import (
 )
 
 type AdminService interface {
-	HandleAdminLogin(ctx context.Context, eventData []byte, correlationID string)
 	HandleCreateAdmin(ctx context.Context, eventData []byte, correlationID string)
 	HandleGetAllAdmins(ctx context.Context, eventData []byte, correlationID string)
 	HandleUpdateAdmin(ctx context.Context, eventData []byte, correlationID string)
 	HandleDeleteAdmin(ctx context.Context, eventData []byte, correlationID string)
 	HandleGetAdminProfile(ctx context.Context, eventData []byte, correlationID string)
 	HandleGetAdminActivityLog(ctx context.Context, eventData []byte, correlationID string)
-	HandleAdminLogout(ctx context.Context, eventData []byte, correlationID string)
 }
 
 type adminService struct {
 	userRepo    repository.UserRepo
 	rmq         *messaging.RabbitMQConnection
 	sendMessage *api.SendingMessage
-}
-
-// HandleAdminLogin is a function to handle admin login
-func (c *adminService) HandleAdminLogin(ctx context.Context, eventData []byte, correlationID string) {
-	if c.sendMessage == nil {
-		logrus.Fatalf("Failed to initialize SendingMessage")
-		return
-	}
-	// Unmarshal event JSON ke struct `AdminLoginEvent`
-	var req models.UserLoginEvent
-	if err := json.Unmarshal(eventData, &req); err != nil {
-		logrus.Errorf("Invalid event data: %v", err)
-		return
-	}
-
-	// Cek if admin already registered
-	existingAdmin, err := c.userRepo.FindUserByEmail(ctx, req.Email)
-	if existingAdmin == nil {
-		errorResponse := c.sendMessage.SendingToMessage("AdminLoginFailed", correlationID, "Admin not found")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish AdminLoginFailed: %v", errorResponse)
-		}
-		return
-	}
-
-	// Check password
-	if !utils.CheckPasswordHash(req.Password, existingAdmin.Password) {
-		errorResponse := c.sendMessage.SendingToMessage("AdminLoginFailed", correlationID, "Invalid password")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish AdminLoginFailed: %v", errorResponse)
-		}
-		return
-	}
-
-	// save to userActivityLog
-	SaveActivityLog := models.UserActivityLog{
-		ID:                primitive.NewObjectID(),
-		UserID:            existingAdmin.ID,
-		ActivityType:      "Login",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
-	}
-
-	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
-	if err != nil {
-		logrus.Errorf("Failed to save user activity log: %v", err)
-	}
-	successResponse := c.sendMessage.SendingToMessage("AdminLoginSuccess", correlationID, models.UserLoginEvent{
-		ID:    existingAdmin.ID.Hex(),
-		Email: existingAdmin.Email,
-		Role:  existingAdmin.Role,
-	})
-
-	if successResponse != nil {
-		logrus.Errorf("failed to publish Admin Login Success %v", successResponse)
-	}
 }
 
 // HandleCreateAdmin is a function to handle admin creation
@@ -101,12 +44,33 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 
 	// Check if super admin is exist
 	superAdmin, err := c.userRepo.FindUserByID(ctx, req.SuperAdminID)
-	if superAdmin == nil || superAdmin.Role != models.RoleSuperAdmin || err != nil {
-		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super Admin not found")
+	if err != nil || superAdmin == nil {
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin not found")
 		if errorResponse != nil {
 			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
 		}
 		return
+	}
+
+	// Check if super admin is super admin
+	superAdminRole, err := c.userRepo.GetRoleNameByID(ctx, superAdmin.RoleID)
+	if err != nil || superAdminRole != models.RoleSuperAdmin {
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin not authorized")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	roleID, err := c.userRepo.GetRoleIDByName(ctx, models.RoleAdmin)
+	if err != nil {
+		roleID = primitive.NewObjectID()
+		newRole := models.Role{
+			ID:   roleID,
+			Name: models.RoleAdmin,
+		}
+
+		_, err = c.userRepo.SaveRole(ctx, &newRole)
 	}
 
 	// hash Password
@@ -135,7 +99,7 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 		Username:  req.Username,
 		Email:     req.Email,
 		Password:  hashedPassword,
-		Role:      models.RoleAdmin,
+		RoleID:    roleID,
 		Avatar:    avatarURL,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -171,6 +135,7 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 		Username:     newAdmin.Username,
 		Email:        newAdmin.Email,
 		AvatarName:   avatarURL,
+		Role:         models.RoleAdmin,
 	})
 
 	if successResponse != nil {
@@ -185,21 +150,44 @@ func (c *adminService) HandleGetAllAdmins(ctx context.Context, eventData []byte,
 		return
 	}
 
-	// get all admins
-	admins, err := c.userRepo.FindUserByRole(ctx, models.RoleAdmin)
+	// get role id from db
+	roleID, err := c.userRepo.GetRoleIDByName(ctx, models.RoleAdmin)
 	if err != nil {
-		logrus.Errorf("Failed to get admins: %v", err)
-		errorResponse := c.sendMessage.SendingToMessage("GetAdminsFailed", correlationID, "Failed to get admins")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish GetAdminsFailed: %v", errorResponse)
-		}
+		logrus.Errorf("[admin-service] Failed to get Role ID for Admins: %v", err)
+		_ = c.sendMessage.SendingToMessage("GetAdminFailed", correlationID, "Failed to get role ID")
 		return
 	}
 
-	// send success response
-	successResponse := c.sendMessage.SendingToMessage("GetAdminsSuccess", correlationID, admins)
-	if successResponse != nil {
-		logrus.Errorf("Failed to publish GetAdminsSuccess: %v", successResponse)
+	// get all user role admin
+	admins, err := c.userRepo.FindUsersByRole(ctx, roleID)
+	if err != nil {
+		logrus.Errorf("[admin-service] Failed to get admins: %v", err)
+		_ = c.sendMessage.SendingToMessage("GetAdminFailed", correlationID, "Failed to get admins")
+		return
+	}
+
+	// Konversi hasil query ke response
+	var adminResponses []models.GetAllAdminsEvent
+	for _, admin := range admins {
+		adminResponses = append(adminResponses, models.GetAllAdminsEvent{
+			AdminId:   admin.ID.Hex(),
+			Username:  admin.Username,
+			Email:     admin.Email,
+			AvatarURL: admin.Avatar,
+			Role:      models.RoleAdmin,
+		})
+	}
+
+	// send response to message broker
+	responseData, err := json.Marshal(adminResponses)
+	if err != nil {
+		logrus.Errorf("[admin-service] Failed to marshal response data: %v", err)
+		_ = c.sendMessage.SendingToMessage("GetAdminFailed", correlationID, "Failed to encode response")
+		return
+	}
+
+	if err := c.sendMessage.SendingToMessage("GetAdminSuccess", correlationID, responseData); err != nil {
+		logrus.Errorf("[admin-service] Failed to publish GetAdminSuccess: %v", err)
 	}
 }
 
@@ -320,11 +308,6 @@ func (c *adminService) HandleGetAdminProfile(ctx context.Context, eventData []by
 }
 
 func (c *adminService) HandleGetAdminActivityLog(ctx context.Context, eventData []byte, correlationID string) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *adminService) HandleAdminLogout(ctx context.Context, eventData []byte, correlationID string) {
 	//TODO implement me
 	panic("implement me")
 }
