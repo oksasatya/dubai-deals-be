@@ -4,5 +4,4 @@ use (
 	api-gateway
 	messaging
 	user-service
-	payment-gateway-service
 )

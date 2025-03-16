@@ -9,8 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"messaging"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -64,7 +62,14 @@ func getStatusText(status int) string {
 }
 
 // HandleEventResponse handles event-based response waiting and processing
-func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool, statusCode int, timeout time.Duration, message string, eventName ...string) error {
+func (h *ResponseHandler) HandleEventResponse(
+	c echo.Context,
+	generateToken bool,
+	statusCode int,
+	timeout time.Duration,
+	successMessage string,
+	eventName ...string,
+) error {
 	if h == nil {
 		logrus.Fatal("HandleEventResponse: ResponseHandler is nil!")
 		return ResponseJson(c, http.StatusInternalServerError, nil, "Internal Server Error: ResponseHandler is nil")
@@ -77,12 +82,11 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 
 	responseEvent, err := messaging.WaitForEvent(h.RMQ, timeout, "api-gateway", eventName...)
 	if err != nil {
-		logrus.Errorf("Event timeout while waiting for: %s", eventName)
+		logrus.Errorf("Event timeout while waiting for: %v", eventName)
 		return ResponseJson(c, http.StatusGatewayTimeout, nil, "Request timed out waiting for response")
 	}
 
-	logrus.Infof("Received event: %s | CorrelationID: %s", eventName, responseEvent.CorrelationID)
-	ctx := c.Request().Context()
+	logrus.Infof("Received event: %s | CorrelationID: %s", responseEvent.EventType, responseEvent.CorrelationID)
 
 	var jsonResponse any
 	if payloadStr, ok := responseEvent.Payload.(string); ok {
@@ -95,14 +99,18 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 		}
 
 		if json.Valid([]byte(payloadStr)) {
-			if err := json.Unmarshal([]byte(payloadStr), &jsonResponse); err != nil {
+			var parsedJson any
+			if err := json.Unmarshal([]byte(payloadStr), &parsedJson); err != nil {
 				logrus.Errorf("[ResponseHandler] Failed to parse event payload: %v", err)
 				return ResponseJson(c, http.StatusInternalServerError, nil, "Failed to parse response")
 			}
+
+			jsonResponse = parsedJson
 		} else {
 			logrus.Warnf("[ResponseHandler] Payload is not valid JSON, returning as string")
-			return ResponseJson(c, http.StatusOK, payloadStr, message)
+			jsonResponse = []map[string]interface{}{}
 		}
+
 	} else if payloadMap, ok := responseEvent.Payload.(map[string]interface{}); ok {
 		jsonResponse = payloadMap
 	} else {
@@ -110,20 +118,40 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 		return ResponseJson(c, http.StatusInternalServerError, nil, "Unexpected event payload format")
 	}
 
-	ttlHoursStr := os.Getenv("JWT_EXPIRATION_TIME")
-	ttlHours := 72
-	if ttlHoursStr != "" {
-		var err error
-		ttlHours, err = strconv.Atoi(ttlHoursStr)
-		if err != nil {
-			logrus.Errorf("Invalid JWT_EXPIRATION_TIME value, using default: %v", err)
+	var failureEvents, successEvents []string
+	for _, event := range eventName {
+		if strings.Contains(strings.ToLower(event), "failed") {
+			failureEvents = append(failureEvents, event)
+		} else {
+			successEvents = append(successEvents, event)
 		}
 	}
 
-	for _, expectedEvent := range eventName {
-		if responseEvent.EventType == expectedEvent {
+	for _, failureEvent := range failureEvents {
+		if responseEvent.EventType == failureEvent {
+			logrus.Warnf("🔥 Handling FAILED Event: %s | Payload: %+v", responseEvent.EventType, responseEvent.Payload)
+
+			var jsonResponse map[string]interface{}
+
+			// **Pastikan payload berupa map[string]interface{}**
+			if payloadMap, ok := responseEvent.Payload.(map[string]interface{}); ok {
+				jsonResponse = payloadMap
+			} else if payloadStr, ok := responseEvent.Payload.(string); ok {
+				jsonResponse = map[string]interface{}{"message": payloadStr}
+			} else {
+				jsonResponse = map[string]interface{}{"message": "Unknown error occurred"}
+			}
+
+			return ResponseJson(c, http.StatusUnauthorized, jsonResponse, "Error")
+		}
+	}
+
+	for _, successEvent := range successEvents {
+		if responseEvent.EventType == successEvent {
+			logrus.Infof("Processing Success Event: %s", successEvent)
+
 			if jsonResponseArray, ok := jsonResponse.([]interface{}); ok {
-				return ResponseJson(c, statusCode, jsonResponseArray, message)
+				return ResponseJson(c, statusCode, jsonResponseArray, successMessage)
 			}
 
 			if jsonResponseMap, ok := jsonResponse.(map[string]interface{}); ok {
@@ -131,28 +159,6 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 				jsonResponse = jsonResponseMap
 			}
 
-			// handle logout
-			if expectedEvent == "UserLogoutSuccess" {
-				logrus.Infof("processing logout event ...")
-				authHeader := c.Request().Header.Get("Authorization")
-				if authHeader != "" {
-					token := strings.TrimPrefix(authHeader, "Bearer ")
-					if token == "" {
-						logrus.Error("No token found")
-						return ResponseJson(c, http.StatusUnauthorized, nil, "Invalid Token")
-					}
-
-					redisErr := config.BlacklistToken(token, time.Duration(ttlHours)*time.Hour)
-					if redisErr != nil {
-						logrus.Errorf("Failed to blacklist token: %v", redisErr)
-						return ResponseJson(c, http.StatusInternalServerError, nil, "Failed to blacklist token")
-					}
-					logrus.Infof("Blacklisted token in redis: %s", token)
-					return ResponseJson(c, http.StatusOK, jsonResponse, message)
-				}
-			}
-
-			//logrus.Infof("Received expected event: %s", expectedEvent)
 			if generateToken {
 				jsonResponseMap, ok := jsonResponse.(map[string]interface{})
 				if !ok {
@@ -168,8 +174,7 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 					return ResponseJson(c, http.StatusInternalServerError, nil, "Failed to generate token")
 				}
 
-				// Redis client
-				storeToken := config.StoreTokenInRedis(ctx, token, userID, userRole, ttlHours)
+				storeToken := config.StoreTokenInRedis(c.Request().Context(), token, userID, userRole, 72)
 				if storeToken != nil {
 					logrus.Errorf("Failed to store token in Redis: %v", storeToken)
 					return ResponseJson(c, http.StatusInternalServerError, nil, "Failed to store token in Redis")
@@ -181,7 +186,7 @@ func (h *ResponseHandler) HandleEventResponse(c echo.Context, generateToken bool
 				jsonResponse = jsonResponseMap
 			}
 
-			return ResponseJson(c, statusCode, jsonResponse, message)
+			return ResponseJson(c, statusCode, jsonResponse, successMessage)
 		}
 	}
 

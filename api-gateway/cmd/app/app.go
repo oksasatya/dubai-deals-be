@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/time/rate"
 	"messaging"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -68,11 +69,15 @@ func (app *App) Initialize() {
 	// Middleware
 	app.Server.Use(middleware.Recover())
 	app.Server.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
-		AllowHeaders: []string{"Origin", "Content-Type", "Accept"},
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowCredentials: true,
 	}))
 	app.Server.Use(middleware.Gzip())
+	app.Server.OPTIONS("/*", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
 
 	rmq, err := messaging.NewRabbitMQConnection()
 	if err != nil {

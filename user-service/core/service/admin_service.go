@@ -166,7 +166,7 @@ func (c *adminService) HandleGetAllAdmins(ctx context.Context, eventData []byte,
 		return
 	}
 
-	// Konversi hasil query ke response
+	// create response
 	var adminResponses []models.GetAllAdminsEvent
 	for _, admin := range admins {
 		adminResponses = append(adminResponses, models.GetAllAdminsEvent{
