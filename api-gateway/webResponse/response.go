@@ -103,6 +103,9 @@ func (h *ResponseHandler) HandleEventResponse(
 			if err := json.Unmarshal([]byte(payloadStr), &parsedJson); err != nil {
 				logrus.Errorf("[ResponseHandler] Failed to parse event payload: %v", err)
 				return ResponseJson(c, http.StatusInternalServerError, nil, "Failed to parse response")
+			} else {
+				logrus.Warnf("[ResponseHandler] Payload is not valid JSON, using as error message")
+				jsonResponse = map[string]interface{}{"message": payloadStr}
 			}
 
 			jsonResponse = parsedJson

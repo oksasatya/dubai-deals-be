@@ -4,37 +4,38 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// AdminCreateRequest struct
+// AdminCreateRequest adalah model untuk request pembuatan admin
 type AdminCreateRequest struct {
-	SuperAdminID string `json:"super_admin_id" validate:"required"`
-	Username     string `json:"username" validate:"required,min=3"`
-	Email        string `json:"email" validate:"required,email"`
-	Password     string `json:"password" validate:"required,min=6"`
-	AvatarData   []byte `json:"avatar_data,omitempty"`
-	AvatarName   string `json:"avatar_name,omitempty"`
+	SuperAdminID string `json:"super_admin_id" form:"super_admin_id" validate:"required"`
+	Username     string `json:"username" form:"username" validate:"required,min=3,max=50"`
+	Email        string `json:"email" form:"email" validate:"required,email"`
+	Password     string `json:"password" form:"password" validate:"required,min=6"`
+	AvatarBase64 string `json:"avatar_base64,omitempty" form:"-"`
+	AvatarName   string `json:"avatar_name,omitempty" form:"-"`
+	AvatarType   string `json:"avatar_type,omitempty" form:"-"`
 }
 
-// Validate func
-func (a *AdminCreateRequest) Validate() error {
+// Validate memvalidasi request pembuatan admin
+func (r *AdminCreateRequest) Validate() error {
 	validate := validator.New()
-	return validate.Struct(a)
+	return validate.Struct(r)
 }
 
-// AdminUpdateRequest struct
+// AdminUpdateRequest adalah model untuk request pembaruan admin
 type AdminUpdateRequest struct {
-	ID         string `json:"id" validate:"required"`
-	Username   string `json:"username,omitempty"`
-	Email      string `json:"email,omitempty" validate:"omitempty,email"`
-	Password   string `json:"password,omitempty" validate:"omitempty,min=6"`
-	AvatarData []byte `json:"avatar_data,omitempty"`
-	AvatarName string `json:"avatar_name,omitempty"`
-	AvatarType string `json:"avatar_type,omitempty"`
+	ID           string `json:"id" form:"id" validate:"required"`
+	Username     string `json:"username" form:"username" validate:"omitempty,min=3,max=50"`
+	Email        string `json:"email" form:"email" validate:"omitempty,email"`
+	Password     string `json:"password" form:"password" validate:"omitempty,min=6"`
+	AvatarBase64 string `json:"avatar_base64,omitempty" form:"-"`
+	AvatarName   string `json:"avatar_name,omitempty" form:"-"`
+	AvatarType   string `json:"avatar_type,omitempty" form:"-"`
 }
 
-// Validate function for AdminUpdateRequest
-func (a *AdminUpdateRequest) Validate() error {
+// Validate memvalidasi request pembaruan admin
+func (r *AdminUpdateRequest) Validate() error {
 	validate := validator.New()
-	return validate.Struct(a)
+	return validate.Struct(r)
 }
 
 type GetAllAdminRequest struct {

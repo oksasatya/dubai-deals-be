@@ -5,11 +5,13 @@ import (
 	"api-gateway/models"
 	"api-gateway/utils"
 	"api-gateway/webResponse"
-	"encoding/json"
+	"bytes"
+	"encoding/base64"
 	"errors"
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
+	"io"
 	"messaging"
 	"net/http"
 	"user-service/api"
@@ -57,14 +59,18 @@ func (h *AdminHandler) CreateAdmin(c echo.Context) error {
 	// check if avatar data is not empty
 	file, fileHeader, err := c.Request().FormFile("avatar")
 	if err == nil {
-		avatarData := make([]byte, fileHeader.Size)
-		_, err = file.Read(avatarData)
-		if err != nil {
+		// Baca file ke buffer
+		buffer := bytes.NewBuffer(nil)
+		if _, err := io.Copy(buffer, file); err != nil {
 			return webResponse.ResponseJson(c, http.StatusBadRequest, nil, "Failed to read avatar data")
 		}
 
-		requestBody.AvatarData = avatarData
+		// Encode ke base64
+		base64Data := base64.StdEncoding.EncodeToString(buffer.Bytes())
+
+		requestBody.AvatarBase64 = base64Data
 		requestBody.AvatarName = fileHeader.Filename
+		requestBody.AvatarType = fileHeader.Header.Get("Content-Type")
 	}
 
 	// bind & validate request
@@ -79,15 +85,14 @@ func (h *AdminHandler) CreateAdmin(c echo.Context) error {
 
 	// Generate Correlation ID
 	correlationID := utils.GenerateCorrelationID()
-	logrus.Infof("Sending AdminCreate event | Correlation ID: %s | Payload: %+v", correlationID, requestBody)
+	logrus.Infof("Sending AdminCreate event | Correlation ID: %s", correlationID)
+
+	// Hapus logging payload lengkap karena berisi data base64 yang sangat besar
+	// Kirim event ke message queue
 	err = h.SendMessage.SendingToMessage("AdminCreate", correlationID, requestBody)
 	if err != nil {
 		return err
 	}
-
-	// event data
-	eventData, _ := json.Marshal(requestBody)
-	err = h.SendMessage.SendingToMessage("AdminCreate", correlationID, eventData)
 
 	logrus.Infof("Waiting for response from AdminCreate event | Correlation ID: %s", correlationID)
 	return h.ResponseHandler.HandleEventResponse(
@@ -124,14 +129,18 @@ func (h *AdminHandler) UpdateAdmin(c echo.Context) error {
 	// check if avatar data is not empty
 	file, fileHeader, err := c.Request().FormFile("avatar")
 	if err == nil {
-		avatarData := make([]byte, fileHeader.Size)
-		_, err = file.Read(avatarData)
-		if err != nil {
+		// Baca file ke buffer
+		buffer := bytes.NewBuffer(nil)
+		if _, err := io.Copy(buffer, file); err != nil {
 			return webResponse.ResponseJson(c, http.StatusBadRequest, nil, "Failed to read avatar data")
 		}
 
-		requestBody.AvatarData = avatarData
+		// Encode ke base64
+		base64Data := base64.StdEncoding.EncodeToString(buffer.Bytes())
+
+		requestBody.AvatarBase64 = base64Data
 		requestBody.AvatarName = fileHeader.Filename
+		requestBody.AvatarType = fileHeader.Header.Get("Content-Type")
 	}
 
 	// bind & validate request
@@ -146,10 +155,10 @@ func (h *AdminHandler) UpdateAdmin(c echo.Context) error {
 
 	// Generate Correlation ID
 	correlationID := utils.GenerateCorrelationID()
-	logrus.Infof("Sending AdminUpdated event | Correlation ID: %s | Payload: %+v", correlationID, requestBody)
+	logrus.Infof("Sending AdminUpdated event | Correlation ID: %s", correlationID)
 
-	eventData, _ := json.Marshal(requestBody)
-	err = h.SendMessage.SendingToMessage("AdminUpdated", correlationID, eventData)
+	// Kirim event ke message queue
+	err = h.SendMessage.SendingToMessage("AdminUpdated", correlationID, requestBody)
 	if err != nil {
 		return err
 	}

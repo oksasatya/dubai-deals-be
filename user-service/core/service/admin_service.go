@@ -28,24 +28,37 @@ type adminService struct {
 	sendMessage *api.SendingMessage
 }
 
-// HandleCreateAdmin is a function to handle admin creation
+// HandleCreateAdmin is a function to handle create admin
 func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, correlationID string) {
 	if c.sendMessage == nil {
 		logrus.Fatalf("Failed to initialize SendingMessage")
 		return
 	}
 
-	// Unmarshal event JSON ke struct `AdminCreateEvent`
+	// Unmarshal event JSON ke struct `AdminCreateRequest`
 	var req models.AdminCreateEvent
 	if err := json.Unmarshal(eventData, &req); err != nil {
 		logrus.Errorf("Invalid event data: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Format data tidak valid")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+		}
 		return
 	}
 
 	// Check if super admin is exist
 	superAdmin, err := c.userRepo.FindUserByID(ctx, req.SuperAdminID)
-	if err != nil || superAdmin == nil {
-		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin not found")
+	if err != nil {
+		logrus.Errorf("Failed to find super admin: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin tidak ditemukan")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	if superAdmin == nil {
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin tidak ditemukan")
 		if errorResponse != nil {
 			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
 		}
@@ -54,8 +67,17 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 
 	// Check if super admin is super admin
 	superAdminRole, err := c.userRepo.GetRoleNameByID(ctx, superAdmin.RoleID)
-	if err != nil || superAdminRole != models.RoleSuperAdmin {
-		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin not authorized")
+	if err != nil {
+		logrus.Errorf("Failed to get role name: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Gagal mendapatkan role super admin")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	if superAdminRole != models.RoleSuperAdmin {
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Super admin tidak memiliki otorisasi")
 		if errorResponse != nil {
 			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
 		}
@@ -71,21 +93,34 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 		}
 
 		_, err = c.userRepo.SaveRole(ctx, &newRole)
+		if err != nil {
+			logrus.Errorf("Failed to save role: %v", err)
+			errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Gagal menyimpan role admin")
+			if errorResponse != nil {
+				logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+			}
+			return
+		}
 	}
 
 	// hash Password
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
 		logrus.Errorf("Failed to hash password: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Gagal meng-hash password")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
+		}
 		return
 	}
 
 	// handle save avatar
 	var avatarURL string
-	if len(req.AvatarData) > 0 {
-		avatarURL, err = utils.SaveAvatar(req.AvatarData, req.Username)
+	if req.AvatarBase64 != "" {
+		avatarURL, err = utils.UploadAvatarFromBase64(req.AvatarBase64, req.Username, req.AvatarType)
 		if err != nil {
-			errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Failed to save avatar")
+			logrus.Errorf("Failed to upload avatar: %v", err)
+			errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Gagal menyimpan avatar")
 			if errorResponse != nil {
 				logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
 			}
@@ -109,7 +144,7 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 	_, err = c.userRepo.SaveUser(ctx, &newAdmin)
 	if err != nil {
 		logrus.Errorf("Failed to save new admin: %v", err)
-		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Failed to save admin")
+		errorResponse := c.sendMessage.SendingToMessage("AdminCreateFailed", correlationID, "Gagal menyimpan admin")
 		if errorResponse != nil {
 			logrus.Errorf("Failed to publish AdminCreateFailed: %v", errorResponse)
 		}
@@ -121,7 +156,7 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 		ID:                primitive.NewObjectID(),
 		UserID:            newAdmin.ID,
 		ActivityType:      "Create Admin",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
 	}
 
 	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
@@ -130,16 +165,181 @@ func (c *adminService) HandleCreateAdmin(ctx context.Context, eventData []byte, 
 	}
 
 	// send success response
-	successResponse := c.sendMessage.SendingToMessage("AdminCreateSuccess", correlationID, models.AdminCreateEvent{
-		SuperAdminID: superAdmin.ID.Hex(),
-		Username:     newAdmin.Username,
-		Email:        newAdmin.Email,
-		AvatarName:   avatarURL,
-		Role:         models.RoleAdmin,
+	successResponse := c.sendMessage.SendingToMessage("AdminCreateSuccess", correlationID, map[string]interface{}{
+		"id":       newAdmin.ID.Hex(),
+		"username": newAdmin.Username,
+		"email":    newAdmin.Email,
+		"avatar":   avatarURL,
+		"role":     models.RoleAdmin,
 	})
 
 	if successResponse != nil {
 		logrus.Errorf("Failed to publish AdminCreateSuccess: %v", successResponse)
+	}
+}
+
+func (c *adminService) HandleUpdateAdmin(ctx context.Context, eventData []byte, correlationID string) {
+	if c.sendMessage == nil {
+		logrus.Fatalf("Failed to initialize SendingMessage")
+		return
+	}
+
+	// Unmarshal event JSON ke struct `AdminUpdateRequest`
+	var req models.AdminUpdateEvent
+	if err := json.Unmarshal(eventData, &req); err != nil {
+		logrus.Errorf("Invalid event data: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Format data tidak valid")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	// find admin by ID
+	_, err := primitive.ObjectIDFromHex(req.ID)
+	if err != nil {
+		logrus.Errorf("Invalid admin ID: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "ID admin tidak valid")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	admin, err := c.userRepo.FindUserByID(ctx, req.ID)
+	if err != nil {
+		logrus.Errorf("Failed to find admin: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Admin tidak ditemukan")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	if admin == nil {
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Admin tidak ditemukan")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	// Check if user is admin
+	adminRole, err := c.userRepo.GetRoleNameByID(ctx, admin.RoleID)
+	if err != nil {
+		logrus.Errorf("Failed to get role name: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Gagal mendapatkan role admin")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	if adminRole != models.RoleAdmin {
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "User bukan admin")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	// replace admin data with new data
+	var updatedAdmin models.User
+
+	// Create updated admin object
+	updatedAdmin = models.User{
+		ID:        admin.ID,
+		Email:     admin.Email,
+		Username:  admin.Username,
+		Password:  admin.Password,
+		RoleID:    admin.RoleID,
+		Avatar:    admin.Avatar,
+		CreatedAt: admin.CreatedAt,
+		UpdatedAt: time.Now(),
+	}
+
+	// Update data admin
+	if req.Username != "" {
+		updatedAdmin.Username = req.Username
+	}
+
+	if req.Email != "" {
+		updatedAdmin.Email = req.Email
+	}
+
+	if req.Password != "" {
+		hashedPassword, err := utils.HashPassword(req.Password)
+		if err != nil {
+			logrus.Errorf("Failed to hash password: %v", err)
+			errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Gagal meng-hash password")
+			if errorResponse != nil {
+				logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+			}
+			return
+		}
+		updatedAdmin.Password = hashedPassword
+	}
+
+	// save old avatar path
+	oldAvatarPath := updatedAdmin.Avatar
+
+	// handle save avatar
+	if req.AvatarBase64 != "" {
+		avatarURL, err := utils.UploadAvatarFromBase64(req.AvatarBase64, updatedAdmin.Username, req.AvatarType)
+		if err != nil {
+			logrus.Errorf("Failed to upload avatar: %v", err)
+			errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Gagal menyimpan avatar")
+			if errorResponse != nil {
+				logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+			}
+			return
+		}
+		updatedAdmin.Avatar = avatarURL
+	}
+
+	// Update admin di database
+	_, err = c.userRepo.UpdateUser(ctx, &updatedAdmin)
+	if err != nil {
+		logrus.Errorf("Failed to update admin: %v", err)
+		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Gagal memperbarui admin")
+		if errorResponse != nil {
+			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
+		}
+		return
+	}
+
+	// delete old avatar if exist
+	if oldAvatarPath != "" && oldAvatarPath != updatedAdmin.Avatar {
+		err = utils.DeleteOldAvatar(oldAvatarPath)
+		if err != nil {
+			logrus.Warnf("Failed to delete old avatar: %v", err)
+		}
+	}
+
+	// save to userActivityLog
+	SaveActivityLog := models.UserActivityLog{
+		ID:                primitive.NewObjectID(),
+		UserID:            updatedAdmin.ID,
+		ActivityType:      "Update Admin",
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
+	}
+
+	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
+	if err != nil {
+		logrus.Errorf("Failed to save user activity log: %v", err)
+	}
+
+	// send success response
+	successResponse := c.sendMessage.SendingToMessage("AdminUpdateSuccess", correlationID, map[string]interface{}{
+		"id":       updatedAdmin.ID.Hex(),
+		"username": updatedAdmin.Username,
+		"email":    updatedAdmin.Email,
+		"avatar":   updatedAdmin.Avatar,
+		"role":     models.RoleAdmin,
+	})
+
+	if successResponse != nil {
+		logrus.Errorf("Failed to publish AdminUpdateSuccess: %v", successResponse)
 	}
 }
 
@@ -188,112 +388,6 @@ func (c *adminService) HandleGetAllAdmins(ctx context.Context, eventData []byte,
 
 	if err := c.sendMessage.SendingToMessage("GetAdminSuccess", correlationID, responseData); err != nil {
 		logrus.Errorf("[admin-service] Failed to publish GetAdminSuccess: %v", err)
-	}
-}
-
-func (c *adminService) HandleUpdateAdmin(ctx context.Context, eventData []byte, correlationID string) {
-	if c.sendMessage == nil {
-		logrus.Fatalf("Failed to initialize SendingMessage")
-		return
-	}
-
-	// Unmarshal event JSON ke struct `AdminUpdateEvent`
-	var req models.AdminUpdateEvent
-	if err := json.Unmarshal(eventData, &req); err != nil {
-		logrus.Errorf("Invalid event data: %v", err)
-		return
-	}
-
-	// check if admin is exist
-	existingAdmin, err := c.userRepo.FindUserByID(ctx, req.ID)
-	if existingAdmin == nil || err != nil {
-		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Admin not found")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
-		}
-		return
-	}
-
-	newEmail := req.Email
-	newUsername := req.Username
-	newPassword := req.Password
-
-	switch {
-	case newEmail != "":
-		existingAdmin.Email = newEmail
-	case newUsername != "":
-		existingAdmin.Username = newUsername
-	case newPassword != "":
-		hashedPassword, err := utils.HashPassword(newPassword)
-		if err != nil {
-			logrus.Errorf("Failed to hash password: %v", err)
-			return
-		}
-		existingAdmin.Password = hashedPassword
-	}
-
-	// handle save avatar
-	newAvatarUrl := existingAdmin.Avatar
-	if len(req.AvatarData) > 0 {
-		uploadedAvatarURL, err := utils.SaveAvatar(req.AvatarData, existingAdmin.Username)
-		if err != nil {
-			errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Failed to save avatar")
-			if errorResponse != nil {
-				logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
-			}
-			return
-		}
-		newAvatarUrl = uploadedAvatarURL
-	}
-
-	// update admin
-	_, err = c.userRepo.SaveUser(ctx, existingAdmin)
-	if err != nil {
-		logrus.Errorf("Failed to update admin: %v", err)
-		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Failed to update admin")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
-		}
-		return
-	}
-
-	updatedAdmin := models.User{
-		ID:        existingAdmin.ID,
-		Username:  newUsername,
-		Email:     newEmail,
-		Password:  newPassword,
-		Avatar:    newAvatarUrl,
-		UpdatedAt: time.Now(),
-	}
-
-	// update user
-	_, err = c.userRepo.UpdateUser(ctx, &updatedAdmin)
-	if err != nil {
-		logrus.Errorf("Failed to update admin: %v", err)
-		errorResponse := c.sendMessage.SendingToMessage("AdminUpdateFailed", correlationID, "Failed to update admin")
-		if errorResponse != nil {
-			logrus.Errorf("Failed to publish AdminUpdateFailed: %v", errorResponse)
-		}
-		return
-	}
-
-	// save to userActivityLog
-	SaveActivityLog := models.UserActivityLog{
-		ID:                primitive.NewObjectID(),
-		UserID:            existingAdmin.ID,
-		ActivityType:      "Update Admin Data",
-		ActivityTimestamp: primitive.DateTime(time.Now().Unix()),
-	}
-
-	_, err = c.userRepo.SaveToActivityLog(ctx, &SaveActivityLog)
-	if err != nil {
-		logrus.Errorf("Failed to save user activity log: %v", err)
-	}
-
-	// send success response
-	successResponse := c.sendMessage.SendingToMessage("AdminUpdateSuccess", correlationID, updatedAdmin)
-	if successResponse != nil {
-		logrus.Errorf("Failed to publish AdminUpdateSuccess: %v", successResponse)
 	}
 }
 

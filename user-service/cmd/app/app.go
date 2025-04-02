@@ -90,6 +90,9 @@ func (app *App) RunConsumer(wg *sync.WaitGroup) {
 		"GetProfile": func(event models.Event) {
 			user.GetProfileUser(context.Background(), utils.MarshalPayload(event.Payload), event.CorrelationID, app.Service.UserService)
 		},
+		"UpdateProfile": func(event models.Event) {
+			user.UpdateProfileUser(context.Background(), utils.MarshalPayload(event.Payload), event.CorrelationID, app.Service.UserService)
+		},
 		"UserLogout": func(event models.Event) {
 			user.HandleLogoutEvent(context.Background(), utils.MarshalPayload(event.Payload), event.CorrelationID, app.Service.UserService)
 		},

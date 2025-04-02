@@ -52,6 +52,23 @@ func (u *UserProfileRequest) Validate() error {
 	return validate.Struct(u)
 }
 
+type UpdateProfileRequest struct {
+	ID           string `json:"id" validate:"required"`
+	Username     string `json:"username" validate:"omitempty,min=3,max=50"`
+	Email        string `json:"email" validate:"omitempty,email"`
+	Address      string `json:"address" validate:"omitempty"`
+	Phone        string `json:"phone" validate:"omitempty"`
+	Age          int    `json:"age" validate:"omitempty,gt=0"`
+	AvatarBase64 string `json:"avatar_base64,omitempty" form:"-"`
+	AvatarName   string `json:"avatar_name,omitempty" form:"-"`
+	AvatarType   string `json:"avatar_type,omitempty" form:"-"`
+}
+
+func (u *UpdateProfileRequest) Validate() error {
+	validate := validator.New()
+	return validate.Struct(u)
+}
+
 // LogoutRequest Request for Logout
 type LogoutRequest struct {
 	UserID string `json:"user_id" validate:"required"`

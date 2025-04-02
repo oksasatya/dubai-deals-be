@@ -21,6 +21,7 @@ type UserService interface {
 	HandleUserLogin(ctx context.Context, eventData []byte, correlationID string)
 	HandleUserOauth(ctx context.Context, eventData []byte, correlationID string)
 	HandleGetProfile(ctx context.Context, eventData []byte, correlationID string)
+	HandleUpdateProfile(ctx context.Context, eventData []byte, correlationID string)
 	HandleUserLogout(ctx context.Context, eventData []byte, correlationID string)
 }
 
@@ -28,6 +29,133 @@ type userService struct {
 	userRepo    repository.UserRepo
 	rmq         *messaging.RabbitMQConnection
 	sendMessage *api.SendingMessage
+}
+
+// HandleUpdateProfile is a function to handle update user profile
+func (c *userService) HandleUpdateProfile(ctx context.Context, eventData []byte, correlationID string) {
+	if c.sendMessage == nil {
+		logrus.Fatalf("Failed to initialize SendingMessage")
+		return
+	}
+
+	// Unmarshal event JSON to struct
+	var req models.UpdateProfileEvent
+	if err := json.Unmarshal(eventData, &req); err != nil {
+		logrus.Errorf("Invalid event data: %v", err)
+		if sendErr := c.sendMessage.SendingToMessage("UpdateProfileFailed", correlationID, "Not Valid Format"); sendErr != nil {
+			logrus.Errorf("Failed to send error message: %v", sendErr)
+		}
+		return
+	}
+
+	// Validate user ID
+	if req.ID == "" {
+		logrus.Errorf("Missing user Id in update profile event")
+		if sendErr := c.sendMessage.SendingToMessage("UpdateProfileFailed", correlationID, "User ID Not Found"); sendErr != nil {
+			logrus.Errorf("Failed to send error message %v", sendErr)
+		}
+		return
+	}
+
+	// Find existing user by ID
+	user, err := c.userRepo.FindUserByID(ctx, req.ID)
+	if err != nil || user == nil {
+		logrus.Errorf("Failed to find user by ID: %s, error: %v", req.ID, err)
+		if sendErr := c.sendMessage.SendingToMessage("UpdateProfileFailed", correlationID, "User Not Found"); sendErr != nil {
+			logrus.Errorf("Failed to send error message %v", sendErr)
+		}
+		return
+	}
+
+	// Copy all fields from existing user to updatedUser
+	var updatedUser models.User
+	updatedUser = models.User{
+		ID:        user.ID,
+		Email:     user.Email,
+		Username:  user.Username,
+		Address:   user.Address,
+		Age:       user.Age,
+		Phone:     user.Phone,
+		Password:  user.Password, // Ensure password is copied
+		RoleID:    user.RoleID,   // Ensure roleID is copied
+		Avatar:    user.Avatar,
+		GoogleID:  user.GoogleID,  // Copy GoogleID if exists
+		CreatedAt: user.CreatedAt, // Copy creation time
+		UpdatedAt: user.UpdatedAt, // Update time will be set later
+	}
+
+	oldAvatarPath := updatedUser.Avatar
+	var avatarChanged bool
+
+	// Update user data only if fields are provided
+	if req.Username != "" {
+		updatedUser.Username = req.Username
+	}
+	if req.Address != "" {
+		updatedUser.Address = req.Address
+	}
+	if req.Age != 0 {
+		updatedUser.Age = req.Age
+	}
+	if req.Phone != "" {
+		updatedUser.Phone = req.Phone
+	}
+
+	// Update avatar if provided
+	if req.Avatar != "" {
+		avatarChanged = true
+		updatedUser.Avatar = req.Avatar
+	}
+
+	// Update timestamp
+	updatedUser.UpdatedAt = time.Now()
+
+	// Update user in database with modified data
+	_, err = c.userRepo.UpdateUser(ctx, &updatedUser)
+	if err != nil {
+		logrus.Errorf("Failed update user %v", err)
+		err := c.sendMessage.SendingToMessage("UpdateProfileFailed", correlationID, "Failed Update Profile")
+		if err != nil {
+			return
+		}
+		return
+	}
+
+	// Delete old avatar if avatar was changed
+	if avatarChanged && oldAvatarPath != "" && oldAvatarPath != updatedUser.Avatar {
+		err = utils.DeleteOldAvatar(oldAvatarPath)
+		if err != nil {
+			logrus.Warnf("Failed to delete old avatar: %v", err)
+		}
+	}
+
+	// Save user activity log
+	saveActivityLog := models.UserActivityLog{
+		ID:                primitive.NewObjectID(),
+		UserID:            updatedUser.ID,
+		ActivityType:      "Update Profile",
+		ActivityTimestamp: primitive.NewDateTimeFromTime(time.Now().UTC()),
+	}
+
+	_, err = c.userRepo.SaveToActivityLog(ctx, &saveActivityLog)
+	if err != nil {
+		logrus.Errorf("Failed To save user Activity Log")
+	}
+
+	// Send success event
+	successResponse := models.UpdateProfileEvent{
+		ID:       updatedUser.ID.Hex(),
+		Email:    updatedUser.Email,
+		Username: updatedUser.Username,
+		Address:  updatedUser.Address,
+		Age:      updatedUser.Age,
+		Phone:    updatedUser.Phone,
+		Avatar:   updatedUser.Avatar,
+	}
+
+	if sendErr := c.sendMessage.SendingToMessage("UpdateProfileSuccess", correlationID, successResponse); sendErr != nil {
+		logrus.Errorf("Failed to send success message %v", sendErr)
+	}
 }
 
 // HandleUserRegistered is a function to handle user registration
@@ -314,6 +442,7 @@ func (c *userService) HandleGetProfile(ctx context.Context, payloadBytes []byte,
 		Address: user.Address,
 		Age:     user.Age,
 		Phone:   user.Phone,
+		Avatar:  user.Avatar,
 	}); err != nil {
 		logrus.Errorf("Failed to publish GetProfileSuccess: %v", err)
 	}

@@ -52,6 +52,18 @@ type GetUserProfileEvent struct {
 	Address string `json:"address"`
 	Phone   string `json:"phone"`
 	Age     int    `json:"age" `
+	Avatar  string `json:"avatar"`
+}
+
+// UpdateProfileEvent struct is used for user/admin update event
+type UpdateProfileEvent struct {
+	ID       string `json:"id"`
+	Email    string `json:"email,omitempty"`
+	Username string `json:"username,omitempty"`
+	Address  string `json:"address,omitempty"`
+	Age      int    `json:"age,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
 }
 
 // UserLogoutEvent struct is used for user logout event
@@ -66,21 +78,21 @@ type AdminCreateEvent struct {
 	Username     string `json:"username"`
 	Email        string `json:"email"`
 	Password     string `json:"password"`
-	AvatarData   []byte `json:"avatar_data"`
-	AvatarName   string `json:"avatar_name"`
-	AvatarType   string `json:"avatar_type"`
+	AvatarBase64 string `json:"avatar_base64,omitempty"`
+	AvatarName   string `json:"avatar_name,omitempty"`
+	AvatarType   string `json:"avatar_type,omitempty"`
 	Role         string `json:"role"`
 }
 
 // AdminUpdateEvent struct is used for admin update event
 type AdminUpdateEvent struct {
-	ID         string `json:"id"`
-	Username   string `json:"username,omitempty"`
-	Email      string `json:"email,omitempty"`
-	Password   string `json:"password,omitempty"`
-	AvatarData []byte `json:"avatar_data,omitempty"`
-	AvatarName string `json:"avatar_name,omitempty"`
-	AvatarType string `json:"avatar_type,omitempty"`
+	ID           string `json:"id"`
+	Email        string `json:"email"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	AvatarBase64 string `json:"avatar_base64,omitempty"`
+	AvatarName   string `json:"avatar_name,omitempty"`
+	AvatarType   string `json:"avatar_type,omitempty"`
 }
 
 // GetAllAdminsEvent struct is used for get all admins event

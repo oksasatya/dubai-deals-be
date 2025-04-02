@@ -17,7 +17,7 @@ services:
 
 
   mongo:
-    image: mongo:latest
+    image: mongo:4
     container_name: mongo_container
     restart: always
     environment:
